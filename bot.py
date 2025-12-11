@@ -23,7 +23,10 @@ WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}.onrender.com{WEBHOOK_PATH}"
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=TOKEN, parse_mode="HTML")
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+
+bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
@@ -264,3 +267,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
