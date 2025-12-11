@@ -24,7 +24,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 TOKEN = "8197183171:AAFyEyEA7NelgtU_ASMYWuDIyGhHuzEZ4KY"  # توکن خودت رو اینجا بذار
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME', 'your-service-name.onrender.com')}{WEBHOOK_PATH}"
-USER_ID = 123456789  # آیدی تلگرام خودت (از @userinfobot بگیر و اینجا بذار)
+USER_ID = 48679788  # آیدی تلگرام خودت (از @userinfobot بگیر و اینجا بذار)
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -292,3 +292,4 @@ if __name__ == "__main__":
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     app.on_startup.append(on_startup)
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
