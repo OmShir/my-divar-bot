@@ -1,4 +1,3 @@
-```python
 # Divar Smart Hunter - نسخه کامل با منوی دکمه (بدون لینک - فقط انتخاب فیلتر)
 # آماده اجرا روی Render.com با webhook - 24/7
 # تمام امکانات: شهر, منطقه, معامله, قیمت, متراژ, امکانات, چک خودکار, ارسال با عکس و تماس
@@ -293,4 +292,3 @@ if __name__ == "__main__":
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     app.on_startup.append(on_startup)
     web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-```
