@@ -1,239 +1,234 @@
+# --- imports ---
 import logging
 import asyncio
 import os
 import json
-import requests
 import threading
-import random
+from collections import deque
 from flask import Flask
+import aiohttp
 from telegram import Update, InputMediaPhoto
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+)
 
-# --- تنظیمات لاگ ---
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+# --- logging ---
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
-# --- متغیرها ---
+# --- env ---
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
+CHAT_ID = int(os.environ.get('CHAT_ID')) if os.environ.get('CHAT_ID') else None
 
-if not TOKEN or not CHAT_ID:
-    logging.critical("🚨 ERROR: TOKEN or CHAT_ID is missing!")
+if not TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN missing")
 
 SETTINGS_FILE = "bot_settings.json"
 SEEN_FILE = "seen_ads.json"
 
+# --- defaults ---
 DEFAULT_SETTINGS = {
-    "min_price": 0, "max_price": 0,
-    "min_area": 0, "max_area": 0,
-    "has_parking": False, "has_elevator": False, "has_warehouse": False,
+    "min_price": 0,
+    "max_price": 0,
+    "min_area": 0,
+    "max_area": 0,
+    "has_parking": False,
+    "has_elevator": False,
+    "has_warehouse": False,
     "query": ""
 }
 
-# --- مدیریت فایل‌ها ---
-def load_json(filename, default):
-    if os.path.exists(filename):
+# --- helpers ---
+def load_json(path, default):
+    if os.path.exists(path):
         try:
-            with open(filename, 'r') as f: return json.load(f)
-        except: pass
+            with open(path, 'r') as f:
+                return json.load(f)
+        except:
+            pass
     return default
 
-def save_json(filename, data):
-    try:
-        if isinstance(data, set): data = list(data)[-1000:]
-        with open(filename, 'w') as f: json.dump(data, f)
-    except: pass
+
+def save_json(path, data):
+    with open(path, 'w') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 user_settings = load_json(SETTINGS_FILE, DEFAULT_SETTINGS.copy())
-seen_ads = set(load_json(SEEN_FILE, []))
+seen_ads = deque(load_json(SEEN_FILE, []), maxlen=1000)
 
-# --- وب‌سرور ---
+# --- flask keep alive ---
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "Bot is Alive!", 200
+def home():
+    return "Bot is Alive", 200
+
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-# --- توابع دیوار ---
-async def get_ad_photos(token):
-    # دریافت عکس‌ها با هدرهای واقعی
-    url = f"https://api.divar.ir/v8/posts/{token}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://divar.ir/',
-    }
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            widgets = data.get('widgets', {}).get('list', [])
-            images = []
-            for widget in widgets:
-                if widget.get('widget_type') == 'IMAGE_CAROUSEL':
-                    items = widget.get('data', {}).get('items', [])
-                    for item in items:
-                        if 'image_url' in item: images.append(item['image_url'])
-            return images
-    except: pass
-    return []
+# --- divar api ---
+DIVAR_SEARCH_URL = "https://api.divar.ir/v8/web-search/karaj/buy-apartment"
+DIVAR_POST_URL = "https://api.divar.ir/v8/posts/{}"
 
-async def fetch_divar_ads():
-    url = "https://api.divar.ir/v8/web-search/karaj/buy-apartment"
-    
-    # تنظیمات دقیق Payload
-    json_schema = {
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Content-Type": "application/json"
+}
+
+
+async def get_ad_photos(session, token):
+    async with session.get(DIVAR_POST_URL.format(token)) as resp:
+        if resp.status != 200:
+            return []
+        data = await resp.json()
+        images = []
+        for w in data.get('widgets', {}).get('list', []):
+            if w.get('widget_type') == 'IMAGE_CAROUSEL':
+                for i in w.get('data', {}).get('items', []):
+                    if 'image_url' in i:
+                        images.append(i['image_url'])
+        return images
+
+
+async def fetch_divar_ads(session):
+    schema = {
         "category": {"value": "buy-apartment"},
-        "cities": ["karaj"],
+        "cities": ["karaj"]
     }
 
-    # فیلترها
-    price_d = {}
-    if user_settings.get("min_price"): price_d["min"] = user_settings["min_price"]
-    if user_settings.get("max_price"): price_d["max"] = user_settings["max_price"]
-    if price_d: json_schema["price"] = price_d
+    if user_settings['min_price'] or user_settings['max_price']:
+        schema['price'] = {
+            k: v for k, v in {
+                'min': user_settings['min_price'],
+                'max': user_settings['max_price']
+            }.items() if v
+        }
 
-    area_d = {}
-    if user_settings.get("min_area"): area_d["min"] = user_settings["min_area"]
-    if user_settings.get("max_area"): area_d["max"] = user_settings["max_area"]
-    if area_d: json_schema["size"] = area_d
+    if user_settings['min_area'] or user_settings['max_area']:
+        schema['size'] = {
+            k: v for k, v in {
+                'min': user_settings['min_area'],
+                'max': user_settings['max_area']
+            }.items() if v
+        }
 
-    if user_settings.get("has_parking"): json_schema["has-parking"] = {"value": True}
-    if user_settings.get("has_elevator"): json_schema["has-elevator"] = {"value": True}
-    if user_settings.get("has_warehouse"): json_schema["has-warehouse"] = {"value": True}
+    for key in ['has_parking', 'has_elevator', 'has_warehouse']:
+        if user_settings[key]:
+            schema[key.replace('_', '-')] = {"value": True}
 
     payload = {
-        "json_schema": json_schema,
-        "last-post-date": 0 
-    }
-    
-    if user_settings.get("query"):
-        payload["query"] = user_settings["query"]
-
-    # هدرهای کامل برای شبیه‌سازی مرورگر
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Origin': 'https://divar.ir',
-        'Referer': 'https://divar.ir/s/karaj/buy-apartment',
-        'Content-Type': 'application/json',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"'
+        "json_schema": schema,
+        "last-post-date": 0,
+        "query": user_settings['query']
     }
 
-    try:
-        logging.info(f"📤 Payload sending: {json.dumps(payload, ensure_ascii=False)}")
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # مسیر جدید در پاسخ‌های دیوار
-            ads = data.get('web_widgets', {}).get('post_list', [])
-            logging.info(f"✅ Divar Response: Found {len(ads)} ads.")
-            return ads
-        else:
-            logging.error(f"❌ Divar API Status: {response.status_code} - {response.text[:100]}")
-    except Exception as e:
-        logging.error(f"❌ Connection Error: {e}")
-    return []
+    async with session.post(DIVAR_SEARCH_URL, json=payload, headers=HEADERS) as resp:
+        if resp.status != 200:
+            return []
+        data = await resp.json()
+        return data.get('web_widgets', {}).get('post_list', [])
 
-async def process_ads(context: ContextTypes.DEFAULT_TYPE, target_chat_id):
-    if not target_chat_id: return
 
-    ads = await fetch_divar_ads()
-    if not ads:
-        logging.info("💤 List is empty.")
-        return
+async def process_ads(context: ContextTypes.DEFAULT_TYPE, chat_id):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+        ads = await fetch_divar_ads(session)
+        for ad in reversed(ads[-5:]):
+            data = ad.get('data', {})
+            token = data.get('token')
+            if not token or token in seen_ads:
+                continue
 
-    new_count = 0
-    # فقط 5 تای آخر
-    for ad in reversed(ads[:5]):
-        data = ad.get('data', {})
-        token = data.get('token')
-        
-        if not token or token in seen_ads:
-            continue
-            
-        title = data.get('title', 'بدون عنوان')
-        price = data.get('middle_description_text', '')
-        district = data.get('district', '')
-        # برخی آگهی‌ها عکس ندارند و image_url خالی است
-        image_url = data.get('image_url') 
-        link = f"https://divar.ir/v/a/{token}"
-        
-        caption = f"🏠 <b>{title}</b>\n📍 {district}\n💰 {price}\n\n🔗 <a href='{link}'>مشاهده</a>"
+            caption = (
+                f"🏠 <b>{data.get('title')}</b>\n"
+                f"📍 {data.get('district', '')}\n"
+                f"💰 {data.get('middle_description_text', '')}\n\n"
+                f"🔗 <a href='https://divar.ir/v/a/{token}'>مشاهده</a>"
+            )
 
-        try:
-            # دریافت آلبوم (فقط اگر عکس اصلی وجود داشت تلاش کن)
-            images = []
-            if image_url:
-                await asyncio.sleep(random.uniform(1.5, 3.0)) # تاخیر تصادفی
-                images = await get_ad_photos(token)
-            
-            if images and len(images) > 0:
+            images = await get_ad_photos(session, token)
+            if images:
                 media = [InputMediaPhoto(images[0], caption=caption, parse_mode='HTML')]
                 for img in images[1:4]:
                     media.append(InputMediaPhoto(img))
-                await context.bot.send_media_group(target_chat_id, media=media)
-            elif image_url:
-                 await context.bot.send_photo(target_chat_id, photo=image_url, caption=caption, parse_mode='HTML')
+                await context.bot.send_media_group(chat_id, media)
             else:
-                await context.bot.send_message(target_chat_id, text=caption, parse_mode='HTML')
-            
-            seen_ads.add(token)
-            new_count += 1
-            
-        except Exception as e:
-            logging.error(f"⚠️ Send Error: {e}")
+                await context.bot.send_message(chat_id, caption, parse_mode='HTML')
 
-    if new_count > 0:
-        save_json(SEEN_FILE, seen_ads)
-        logging.info(f"📤 Sent {new_count} ads.")
+            seen_ads.append(token)
 
-# --- هندلرها ---
-async def start(update, context): await update.message.reply_text("🤖 ربات آماده است. /update را بزنید.")
-async def manual_update(update, context): 
-    await update.message.reply_text("🔄 جستجو...")
+        save_json(SEEN_FILE, list(seen_ads))
+
+# --- telegram commands ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ربات فعال است ✅\n/help")
+
+
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "/set_price min max\n"
+        "/set_area min max\n"
+        "/parking on|off\n"
+        "/elevator on|off\n"
+        "/warehouse on|off\n"
+        "/query متن\n"
+        "/update"
+    )
+
+
+async def set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_settings['min_price'] = int(context.args[0])
+    user_settings['max_price'] = int(context.args[1])
+    save_json(SETTINGS_FILE, user_settings)
+    await update.message.reply_text("✅ قیمت تنظیم شد")
+
+
+async def set_area(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_settings['min_area'] = int(context.args[0])
+    user_settings['max_area'] = int(context.args[1])
+    save_json(SETTINGS_FILE, user_settings)
+    await update.message.reply_text("✅ متراژ تنظیم شد")
+
+
+async def toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, key):
+    user_settings[key] = context.args[0].lower() == 'on'
+    save_json(SETTINGS_FILE, user_settings)
+    await update.message.reply_text(f"✅ {key} تنظیم شد")
+
+
+async def manual_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("در حال بررسی...")
     await process_ads(context, update.effective_chat.id)
-    await update.message.reply_text("✅ پایان.")
+    await update.message.reply_text("تمام شد")
 
-# تنظیم مقادیر (ساده شده برای جلوگیری از خطا)
-async def set_command(update, context):
-    try:
-        cmd = update.message.text.split()[0][1:] # min_price
-        val = int(context.args[0])
-        # مپ کردن دستورات به کلیدهای تنظیمات
-        key_map = {
-            "min": "min_price", "max": "max_price",
-            "minarea": "min_area", "maxarea": "max_area"
-        }
-        if cmd in key_map:
-            user_settings[key_map[cmd]] = val
-            save_json(SETTINGS_FILE, user_settings)
-            await update.message.reply_text(f"✅ {key_map[cmd]} = {val}")
-    except: await update.message.reply_text("❌ خطا در مقداردهی")
 
-async def status(update, context):
-    await update.message.reply_text(f"📊 {json.dumps(user_settings, indent=2, ensure_ascii=False)}")
+async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
+    await process_ads(context, CHAT_ID)
 
+# --- main ---
 if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
-    
-    if not TOKEN: exit(1)
 
-    app_bot = ApplicationBuilder().token(TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("update", manual_update))
-    app_bot.add_handler(CommandHandler("status", status))
-    # هندلرهای تنظیم قیمت و متراژ
-    app_bot.add_handler(CommandHandler(["min", "max", "minarea", "maxarea"], set_command))
+    app_tg = ApplicationBuilder().token(TOKEN).build()
+
+    app_tg.add_handler(CommandHandler("start", start))
+    app_tg.add_handler(CommandHandler("help", help_cmd))
+    app_tg.add_handler(CommandHandler("set_price", set_price))
+    app_tg.add_handler(CommandHandler("set_area", set_area))
+    app_tg.add_handler(CommandHandler("parking", lambda u, c: toggle(u, c, 'has_parking')))
+    app_tg.add_handler(CommandHandler("elevator", lambda u, c: toggle(u, c, 'has_elevator')))
+    app_tg.add_handler(CommandHandler("warehouse", lambda u, c: toggle(u, c, 'has_warehouse')))
+    app_tg.add_handler(CommandHandler("update", manual_update))
 
     if CHAT_ID:
-        # چک کردن هر 30 دقیقه (تایم کمتر ممکن است باعث بلاک شدن شود)
-        app_bot.job_queue.run_repeating(lambda c: process_ads(c, CHAT_ID), interval=1800, first=10)
+        app_tg.job_queue.run_repeating(scheduled_job, interval=3600, first=10)
 
-    app_bot.run_polling()
+    app_tg.run_polling()
