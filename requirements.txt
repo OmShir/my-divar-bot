@@ -1,3 +1,4 @@
 requests
 flask
 python-telegram-bot[job-queue]
+aiohttp>=3.9.0
