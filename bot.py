@@ -167,51 +167,87 @@ async def process_ads(context: ContextTypes.DEFAULT_TYPE, chat_id):
 
         save_json(SEEN_FILE, list(seen_ads))
 
-# --- telegram commands ---
+# --- telegram commands (INLINE UI) ---
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("ربات فعال است ✅\n/help")
+    await show_settings_menu(update, context)
 
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "/set_price min max\n"
-        "/set_area min max\n"
-        "/parking on|off\n"
-        "/elevator on|off\n"
-        "/warehouse on|off\n"
-        "/query متن\n"
-        "/update"
+async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("💰 قیمت", callback_data="set_price")],
+        [InlineKeyboardButton("📐 متراژ", callback_data="set_area")],
+        [InlineKeyboardButton("🚗 پارکینگ", callback_data="toggle_parking")],
+        [InlineKeyboardButton("🛗 آسانسور", callback_data="toggle_elevator")],
+        [InlineKeyboardButton("📦 انباری", callback_data="toggle_warehouse")],
+        [InlineKeyboardButton("🔎 جستجو", callback_data="set_query")],
+        [InlineKeyboardButton("🔄 بروزرسانی", callback_data="manual_update")],
+    ]
+    markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "⚙️ تنظیمات فیلتر دیوار\n\n"
+        f"💰 قیمت: {user_settings['min_price']} - {user_settings['max_price']}\n"
+        f"📐 متراژ: {user_settings['min_area']} - {user_settings['max_area']}\n"
+        f"🚗 پارکینگ: {'✅' if user_settings['has_parking'] else '❌'}\n"
+        f"🛗 آسانسور: {'✅' if user_settings['has_elevator'] else '❌'}\n"
+        f"📦 انباری: {'✅' if user_settings['has_warehouse'] else '❌'}\n"
+        f"🔎 جستجو: {user_settings['query'] or '-'}"
     )
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup)
+    else:
+        await update.message.reply_text(text, reply_markup=markup)
 
 
-async def set_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_settings['min_price'] = int(context.args[0])
-    user_settings['max_price'] = int(context.args[1])
-    save_json(SETTINGS_FILE, user_settings)
-    await update.message.reply_text("✅ قیمت تنظیم شد")
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    context.user_data.clear()
+
+    if data == "set_price":
+        context.user_data['await'] = 'price'
+        await query.message.reply_text("حداقل و حداکثر قیمت را وارد کن:\nمثال: 3000000000 7000000000")
+    elif data == "set_area":
+        context.user_data['await'] = 'area'
+        await query.message.reply_text("حداقل و حداکثر متراژ را وارد کن:\nمثال: 80 140")
+    elif data.startswith("toggle_"):
+        key = data.replace("toggle_", "has_")
+        user_settings[key] = not user_settings[key]
+        save_json(SETTINGS_FILE, user_settings)
+        await show_settings_menu(update, context)
+    elif data == "set_query":
+        context.user_data['await'] = 'query'
+        await query.message.reply_text("متن جستجو را وارد کن:")
+    elif data == "manual_update":
+        await query.message.reply_text("در حال بررسی...")
+        await process_ads(context, query.message.chat_id)
+        await query.message.reply_text("تمام شد")
 
 
-async def set_area(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_settings['min_area'] = int(context.args[0])
-    user_settings['max_area'] = int(context.args[1])
-    save_json(SETTINGS_FILE, user_settings)
-    await update.message.reply_text("✅ متراژ تنظیم شد")
+async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if 'await' not in context.user_data:
+        return
 
+    mode = context.user_data.pop('await')
+    text = update.message.text.strip()
 
-async def toggle(update: Update, context: ContextTypes.DEFAULT_TYPE, key):
-    user_settings[key] = context.args[0].lower() == 'on'
-    save_json(SETTINGS_FILE, user_settings)
-    await update.message.reply_text(f"✅ {key} تنظیم شد")
-
-
-async def manual_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("در حال بررسی...")
-    await process_ads(context, update.effective_chat.id)
-    await update.message.reply_text("تمام شد")
-
-
-async def scheduled_job(context: ContextTypes.DEFAULT_TYPE):
-    await process_ads(context, CHAT_ID)
+    try:
+        if mode == 'price':
+            a, b = map(int, text.split())
+            user_settings['min_price'], user_settings['max_price'] = a, b
+        elif mode == 'area':
+            a, b = map(int, text.split())
+            user_settings['min_area'], user_settings['max_area'] = a, b
+        elif mode == 'query':
+            user_settings['query'] = text
+        save_json(SETTINGS_FILE, user_settings)
+        await show_settings_menu(update, context)
+    except:
+        await update.message.reply_text("❌ ورودی نامعتبر است")
 
 # --- main ---
 if __name__ == '__main__':
