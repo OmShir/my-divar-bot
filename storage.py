@@ -9,8 +9,11 @@ def load_seen():
     if not os.path.exists(FILE):
         return set()
 
-    with open(FILE, "r") as f:
-        return set(json.load(f))
+    try:
+        with open(FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
 
 
 def save_seen(seen):
