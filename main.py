@@ -1,57 +1,58 @@
+from collector import collect_raw
+from parser import parse_ads
 from analyzer import *
-from notifier import *
+from notifier import send
+from storage import load_seen, save_seen
+from config import MIN_SCORE
 
-ads = [
-    {
-        "title": "PS5 Slim",
-        "price": 19000000,
-        "url": "..."
-    },
-    {
-        "title": "PS5 Slim",
-        "price": 24000000,
-        "url": "..."
-    },
-    {
-        "title": "PS5 Slim",
-        "price": 25000000,
-        "url": "..."
-    }
-]
 
-prices = [
-    x["price"]
-    for x in ads
-]
+def run():
 
-market = market_price(
-    prices
-)
+    state = collect_raw()
+    ads = parse_ads(state)
 
-for ad in ads:
+    if not ads:
+        return
 
-    s = score(
-        ad["price"],
-        market
-    )
+    seen = load_seen()
 
-    if s > 15:
+    prices = [
+        a["price"] for a in ads
+        if a["price"] > 0
+    ]
 
-        send(
-            f"""
-🔥 Opportunity
+    if len(prices) < 5:
+        return
+
+    market = market_price(prices)
+
+    for ad in ads:
+
+        if ad["url"] in seen:
+            continue
+
+        s = score(ad["price"], market)
+
+        if is_good_deal(s, MIN_SCORE):
+
+            msg = f"""
+🔥 PS5 Opportunity
 
 {ad['title']}
 
-Price:
-{ad['price']:,}
-
-Market:
-{market:,.0f}
-
-Discount:
-{s:.1f}%
+Price: {ad['price']:,}
+Market: {int(market):,}
+Discount: {s:.1f}%
 
 {ad['url']}
 """
-        )
+
+            send(msg)
+
+            seen.add(ad["url"])
+
+    save_seen(seen)
+
+
+if __name__ == "__main__":
+    run()
