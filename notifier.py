@@ -1,15 +1,23 @@
 import requests
-import config
+from config import BOT_TOKEN, CHAT_ID
 
 
-def send(text):
+def send(msg):
 
-    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendMessage"
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Missing Telegram config")
+        return
 
-    requests.post(
-        url,
-        json={
-            "chat_id": config.CHAT_ID,
-            "text": text
-        }
-    )
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+    try:
+        requests.post(
+            url,
+            json={
+                "chat_id": CHAT_ID,
+                "text": msg
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print("Telegram error:", e)
