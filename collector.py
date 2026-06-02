@@ -1,40 +1,36 @@
 import requests
-from bs4 import BeautifulSoup
-import json
-import re
-from config import URL
-
+from config import LIMIT
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
 }
 
 
-def fetch_html():
-    r = requests.get(URL, headers=HEADERS, timeout=15)
-    return r.text
+URL = "https://api.divar.ir/v8/web-search/"
 
 
-def extract_state(html):
-    match = re.search(
-        r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\});",
-        html
+def fetch_raw():
+
+    payload = {
+        "json_schema": {
+            "category": {
+                "value": "game-console"
+            },
+            "query": "PS5"
+        },
+        "size": LIMIT
+    }
+
+    r = requests.post(
+        URL,
+        json=payload,
+        headers=HEADERS,
+        timeout=15
     )
 
-    if not match:
+    if r.status_code != 200:
+        print("HTTP ERROR:", r.status_code)
         return None
 
-    try:
-        return json.loads(match.group(1))
-    except:
-        return None
-
-
-def collect_raw():
-    html = fetch_html()
-    state = extract_state(html)
-
-    if not state:
-        return []
-
-    return state
+    return r.json()
