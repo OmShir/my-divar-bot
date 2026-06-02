@@ -1,4 +1,4 @@
-from collector import collect_raw
+from collector import fetch_raw
 from parser import parse_ads
 from analyzer import *
 from notifier import send
@@ -8,35 +8,48 @@ from config import MIN_SCORE
 
 def run():
 
-    state = collect_raw()
-    ads = parse_ads(state)
+    print("START")
 
-    if not ads:
+    data = fetch_raw()
+
+    if not data:
+        print("No data from API")
+        return
+
+    ads = parse_ads(data)
+
+    print("ADS:", len(ads))
+
+    if len(ads) < 5:
+        print("Not enough ads")
         return
 
     seen = load_seen()
 
     prices = [
-        a["price"] for a in ads
+        a["price"]
+        for a in ads
         if a["price"] > 0
     ]
 
-    if len(prices) < 5:
-        return
-
     market = market_price(prices)
+
+    print("Market:", market)
 
     for ad in ads:
 
         if ad["url"] in seen:
             continue
 
+        if ad["price"] == 0:
+            continue
+
         s = score(ad["price"], market)
 
-        if is_good_deal(s, MIN_SCORE):
+        if is_good(s, MIN_SCORE):
 
             msg = f"""
-🔥 PS5 Opportunity
+🔥 PS5 DEAL
 
 {ad['title']}
 
