@@ -21,17 +21,14 @@ def fetch_raw():
 
         print("STATUS:", r.status_code)
 
-        if r.status_code != 200:
-            return None
-
         data = r.json()
 
-        print("RAW KEYS:", data.keys())
+        print("KEYS:", data.keys())
 
         return data
 
     except Exception as e:
 
-        print("FETCH ERROR:", e)
+        print("ERROR:", e)
 
         return None
