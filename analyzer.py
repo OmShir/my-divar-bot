@@ -1,20 +1,10 @@
 import numpy as np
 
 
-def detect_model(title):
-
-    t = title.lower()
-
-    if "pro" in t:
-        return "PS5 Pro"
-
-    if "slim" in t:
-        return "PS5 Slim"
-
-    return "PS5"
-
-
 def market_price(prices):
+
+    if not prices:
+        return 0
 
     return np.median(prices)
 
@@ -27,6 +17,6 @@ def score(price, market):
     return ((market - price) / market) * 100
 
 
-def is_good_deal(score_value, min_score):
+def is_good(score_value, min_score):
 
     return score_value >= min_score
