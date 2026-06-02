@@ -1,19 +1,3 @@
-import re
-
-
-def extract_price(text):
-
-    if not text:
-        return 0
-
-    nums = re.findall(r"\d+", str(text))
-
-    if not nums:
-        return 0
-
-    return int("".join(nums))
-
-
 def parse_ads(data):
 
     ads = []
@@ -31,16 +15,11 @@ def parse_ads(data):
 
             ads.append({
                 "title": d.get("title", ""),
-                "price": extract_price(
-                    d.get("middle_description")
-                ),
-                "url": "https://divar.ir/v/" + d.get(
-                    "action", {}
-                ).get(
-                    "payload", {}
-                ).get(
-                    "web_url", ""
-                )
+                "price": d.get("middle_description", ""),
+                "url": "https://divar.ir/v/" +
+                       d.get("action", {})
+                        .get("payload", {})
+                        .get("web_url", "")
             })
 
     except Exception as e:
