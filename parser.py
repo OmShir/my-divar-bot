@@ -1,42 +1,30 @@
-import re
+def parse_ads(state):
 
+    ads = []
 
-def detect_model(title):
+    try:
+        widgets = state.get("widgetList", [])
 
-    t = title.lower()
+        for w in widgets:
 
-    if "pro" in t:
-        return "PS5 Pro"
+            data = w.get("data")
 
-    if "slim" in t:
-        return "PS5 Slim"
+            if not data:
+                continue
 
-    return "PS5"
+            for item in data:
 
+                try:
+                    ads.append({
+                        "title": item.get("title", ""),
+                        "price": item.get("price", 0),
+                        "url": "https://divar.ir/v/" + item.get("token", "")
+                    })
 
-def extract_storage(title):
+                except:
+                    continue
 
-    t = title.lower()
+    except:
+        pass
 
-    if "1tb" in t:
-        return "1TB"
-
-    if "825" in t:
-        return "825GB"
-
-    return "Unknown"
-
-
-def extract_price(text):
-
-    digits = re.findall(
-        r"\d+",
-        text
-    )
-
-    if not digits:
-        return None
-
-    return int(
-        "".join(digits)
-    )
+    return ads[:30]
