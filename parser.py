@@ -4,23 +4,34 @@ def parse_ads(data):
 
     try:
 
-        widgets = data.get("web_widgets", [])
+        widgets = data.get("widget_list", [])
 
         for w in widgets:
 
-            if w.get("@type") != "POST_ROW":
+            widget_type = w.get("@type")
+
+            # مهم‌ترین تغییر: اینجا SEARCH_RESULT_PAGE است
+            if widget_type != "SEARCH_RESULT_PAGE":
                 continue
 
-            d = w.get("data", {})
+            items = w.get("data", {}).get("items", [])
 
-            ads.append({
-                "title": d.get("title", ""),
-                "price": d.get("middle_description", ""),
-                "url": "https://divar.ir/v/" +
-                       d.get("action", {})
-                        .get("payload", {})
-                        .get("web_url", "")
-            })
+            for item in items:
+
+                try:
+
+                    action = item.get("action", {})
+
+                    payload = action.get("payload", {})
+
+                    ads.append({
+                        "title": item.get("title", ""),
+                        "price": item.get("middle_description", ""),
+                        "url": "https://divar.ir/v/" + payload.get("web_url", "")
+                    })
+
+                except:
+                    continue
 
     except Exception as e:
         print("PARSE ERROR:", e)
