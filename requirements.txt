@@ -1,3 +1,5 @@
-flask
-python-telegram-bot[job-queue]
-tls-client
+requests
+beautifulsoup4
+rapidfuzz
+pandas
+numpy
