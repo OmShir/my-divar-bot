@@ -1,21 +1,15 @@
-import os
 import requests
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+import config
 
 
 def send(text):
 
-    url = (
-        f"https://api.telegram.org"
-        f"/bot{BOT_TOKEN}/sendMessage"
-    )
+    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendMessage"
 
     requests.post(
         url,
         json={
-            "chat_id": CHAT_ID,
+            "chat_id": config.CHAT_ID,
             "text": text
         }
     )
